@@ -1,0 +1,202 @@
+# Building a SIEM Lab
+
+## Introduction
+In today's data-driven world, efficient log management is essential for maintaining system health, troubleshooting issues, and ensuring security. As part of a personal project, I undertook the task of setting up and configuring the Elastic Stack to streamline log management processes. This highly technical endeavor involved installing and integrating Elasticsearch, Kibana,  Logstash to create a log management solution.
+
+## Objective
+The primary objective of this project was to establish a centralized logging infrastructure capable of collecting, processing, analyzing, and visualizing log data from multiple sources in real-time.
+
+### Step 1: Installing and Configuring Elasticsearch
+Elasticsearch serves as the heart of our logging infrastructure, providing a distributed search and analytics engine for storing and querying log data. I installed Elasticsearch on an Ubuntu 22.04 server and configured it to listen on localhost. Key configurations, such as network host settings, were adjusted to optimize performance and security.
+
+To install and configure Elasticsearch, I needed to add Elastic’s package source list as Elasticsearch components are not available in Ubuntu’s default package repositories.
+
+The `wget` command to the `gpg --dearmor` command, which converts the key into a format that `apt` can use to verify downloaded packages
+
+```
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+```
+
+if there is an error
+```
+cat GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+```
+
+You may need to install the `apt-transport-https` package on Debian before proceeding
+
+```
+sudo apt-get install apt-transport-https
+```
+
+Next, add the Elastic source list to the `sources.list.d` directory, where APT will search for new sources
+
+```
+echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-8.x.list
+```
+
+Next, update your package lists so APT will read the new Elastic source and install Elasticsearch with this command:
+
+```
+sudo apt-get update && sudo apt-get install elasticsearch
+```
+
+After installing, scroll up and look at the generated superuser password for elasticsearch and save is somewhere where you can find it again. There is some other inforamtion that is importnat to remember, but 
+
+Elasticsearch is now installed and ready to be configured. Use your preferred text editor to edit Elasticsearch’s main configuration file, `elasticsearch.yml`. Most options are preconfigured, but can be changed according to your needs. We will only adjust the settings for the network host.
+
+```
+sudo nano /etc/elasticsearch/elasticsearch.yml
+```
+
+find `network.host`, uncomment it, and replace its value with `localhost`. If you are struggling to find the line, you can use the `grep` command with the -n flag.
+
+```
+sudo grep network.host -n /etc/elasticsearch/elasticsearch.yml
+```
+
+the output of the command will give you a number, when inside of nano, you can use Ctrl+6+/ and enter the number to be taken to the line. 
+
+Uncomment and make sure that `node.name` and `cluster.initial_master_nodes` have the same name, it can left as node-1 or anything name you want
+
+Start the service
+
+```
+sudo systemctl start elasticsearch
+```
+
+Enable Elasticsearch to start up every time your server boots
+
+```
+sudo systemctl enable elasticsearch
+```
+
+to check that everything is running properly
+
+```
+curl --cacert /etc/elasticsearch/certs/http_ca.crt -u elastic:<password> https://localhost:9200
+```
+
+you should get an output like 
+
+```
+{
+  "name" : "node-1",
+  "cluster_name" : "elasticsearch",
+  "cluster_uuid" : "n8Qu5CjWSmyIXBzRXK-j4A",
+  "version" : {
+    "number" : "8.13.0",
+    "build_flavor" : "default",
+    "build_type" : "deb",
+    "build_hash" : "de7261de50d90919ae53b0eff9413fd7e5307301",
+    "build_date" : "2024-03-22T03:35:46.757803203Z",
+    "build_snapshot" : false,
+    "lucene_version" : "9.10.0",
+    "minimum_wire_compatibility_version" : "7.17.0",
+    "minimum_index_compatibility_version" : "7.0.0"
+  },
+  "tagline" : "You Know, for Search"
+}
+```
+
+### Step 2: Setting Up Kibana for Data Visualization
+Kibana, a powerful data visualization platform, was integrated to provide a user-friendly interface for querying and visualizing log data stored in Elasticsearch. I installed Kibana and configured it to listen on localhost. Additionally, I utilized Nginx as a reverse proxy to enable external access to the Kibana web interface, enhancing security through basic authentication.
+
+installing Kabana was easier than Elasticsearch because we’ve already added the Elastic package source in the previous step, you can just install the remaining components of the Elastic Stack using `apt`
+
+Installs Kibana
+
+```
+sudo apt install kibana -y
+```
+
+You need to change the `Server.host` by uncommenting it and changing it to localhost 
+
+```
+sudo nano /etc/kibana/kibana.yml
+```
+
+Start Kibana
+```
+sudo systemctl start kibana
+```
+
+Enables Kibana on boot
+```
+sudo systemctl enable kibana
+```
+
+navigate to http://localhost:5601 
+
+use the command and past the output of the command into the enrollmenttoken textbox
+
+```
+sudo /usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token --scope kibana
+```
+
+for the verification code, use the command:
+
+```
+sudo /usr/share/kibana/bin/kibana-verification-code
+```
+
+wait for a few minutes until you get to a login page for elastic. your username is going to be `elastic` and your password is the same one copied earlier from the Elasticsearch install. If you dont remeber your password, you can use the follwing command to get a new one:
+
+```
+/usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic
+```
+
+When prompted to add integrations, you can click 'explore on your own'.
+
+### Step 3: Configuring Logstash for Data Processing
+Logstash was employed to ingest, parse, and enrich log data before indexing it into Elasticsearch. Configuration files were created to define input (Beats) and output (Elasticsearch) pipelines, ensuring seamless data flow and efficient processing. Testing of Logstash configurations was conducted to validate proper functionality.
+
+Install Logstash
+
+```
+sudo apt install logstash
+```
+
+they have a template configuration file, copy it over to the `conf.d` directory
+
+```
+sudo cp /etc/logstash/logstash-sample.conf /etc/logstash/conf.d/
+```
+
+after copying, make some edits to the configuration file. While looking at the configuration file, use the elastic and its password for `user` and `password`. Uncomment them both. Underneath password, add `ssl_certificate_verification => false` then save and exit.
+
+```
+sudo nano /etc/logstash/conf.d/logstash-sample.conf 
+```
+
+Open up your browser and go back to http://localhost:5601. In the hamburger menu in the top left, click on it and scroll down to 'Management' and click on it.
+
+Look back at the navigation menu on the left, underneath the 'Security' section, you will see 'Users', click on it. 
+
+In the 'Users' tab, find the user called logstash_system and click on its name. Scroll down to change password and change its password.
+
+back in terminal, use the command
+
+```
+sudo nano /etc/logstash/conf.d/logstash-sample.conf 
+```
+
+Change `user` to logstash_system and `password` to whatever password you just change that use to inside of elastic
+
+Using Logstash as a pipeline of data from Beats to elastic search requires two elements, `input` and `output`, and one optional element, `filter`.
+
+```
+sudo nano /etc/logstash/conf.d/02-beats-input.conf
+```
+
+to save changes made to configurations
+
+```
+sudo systemctl restart logstash
+```
+
+
+## Future Work 
+I would like to continue to develop the ELK stack by including Filebeat to forward data from sources to our Elasticsearch cluster. Another feature I would want to test out is setting up a fleet server and delaying out agents key to various other VMs to test the capabilities within elastic's analyzing functionality and its ability to create alerts. Going back, there are several location with the configuration files what allows for  Certificate authorities and SSL/TLS encryptions to better enhance security. 
+
+## Conclusion
+By successfully configuring the Elastic Stack for log management, demonstrating proficiency in implementing complex logging solutions. This project not only enhanced my technical skills but also provided valuable insights into best practices for log management and monitoring. Moving forward, I am excited to apply this knowledge and experience to the real-world, contributing to the development of scalable and efficient security solutions.
